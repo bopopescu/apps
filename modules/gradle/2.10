@@ -1,0 +1,9 @@
+#%Module 1.0
+
+set	app		gradle
+set	version		2.10
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+append-path	PATH		$modroot/bin
+
+conflict	$app
