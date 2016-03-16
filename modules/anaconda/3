@@ -1,0 +1,32 @@
+#%Module 1.0
+
+set	app		anaconda
+
+set	version		2
+set	modroot		$::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path	PATH		$modroot/bin
+prepend-path	MANPATH		$modroot/share/man
+
+
+set	version		3
+set	modroot		$::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path	PATH		$modroot/bin
+prepend-path	MANPATH		$modroot/share/man
+append-path     CPATH           $modroot/include
+append-path     CPATH		$modroot/include/ncurses
+append-path     LD_LIBRARY_PATH $modroot/lib
+append-path     LD_RUN_PATH     $modroot/lib
+append-path	PKG_CONFIG_PATH	$modroot/lib/pkgconfig
+
+setenv	TCL_LIBRARY	$modroot/lib/tcl8.5
+
+
+set	version		2
+set	modroot		$::env(MODIMAGE_PATH)/$app/$version
+
+append-path     CPATH           $modroot/include
+append-path     CPATH		$modroot/include/ncurses
+append-path     LD_LIBRARY_PATH $modroot/lib
+append-path     LD_RUN_PATH     $modroot/lib

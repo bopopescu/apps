@@ -1,0 +1,15 @@
+#%Module 1.0
+
+set	app		jdk
+set	version		1.7.0-80
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+setenv	JAVA_HOME	$modroot
+
+append-path	PATH		$modroot/db/bin
+prepend-path	PATH		$modroot/jre/bin
+prepend-path	PATH		$modroot/bin
+prepend-path	MANPATH		$modroot/jre/man
+prepend-path	MANPATH		$modroot/man
+
+conflict	$app jre
