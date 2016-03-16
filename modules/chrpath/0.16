@@ -1,0 +1,10 @@
+#%Module 1.0
+
+set	app		chrpath
+set	version		0.16
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+append-path	PATH		$modroot/bin
+append-path	MANPATH		$modroot/share/man
+
+conflict	$app
