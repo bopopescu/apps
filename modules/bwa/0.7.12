@@ -1,0 +1,9 @@
+#%Module 1.0
+
+set	app		bwa
+set	version		0.7.12
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+append-path	PATH		$modroot
+
+conflict	$app
