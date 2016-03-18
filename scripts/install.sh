@@ -1,7 +1,5 @@
 #!/bin/bash
 
-export MODAPP_PATH="$(dirname $(readlink -e "${BASH_SOURCE[0]}"))/../"
-
 module_append() {
     case ":${MODULEPATH}:" in
     *:${1}:*)
@@ -11,8 +9,8 @@ module_append() {
     esac
 }
 
-module_append "${MODAPP_PATH}/modules"
-export MODIMAGE_PATH="${MODAPP_PATH}/images"
+module_append "${1}/modules"
+export MODIMAGE_PATH="${1}/images"
 
 echo "Installing Anaconda..."
 pushd /tmp
@@ -21,15 +19,15 @@ wget http://repo.continuum.io/archive/Anaconda2-2.5.0-Linux-x86_64.sh
 chmod +x Anaconda2-2.5.0-Linux-x86_64.sh
 wget http://repo.continuum.io/archive/Anaconda3-2.5.0-Linux-x86_64.sh
 chmod +x Anaconda3-2.5.0-Linux-x86_64.sh
-rm -r "${MODAPP_PATH}/images/anaconda"
-./Anaconda2-2.5.0-Linux-x86_64.sh -bp "${MODAPP_PATH}/images/anaconda/2"
-"${MODAPP_PATH}/images/anaconda/2/bin/conda" update -y conda
-"${MODAPP_PATH}/images/anaconda/2/bin/conda" update -y anaconda
-"${MODAPP_PATH}/images/anaconda/2/bin/conda" update -yc https://conda.binstar.org/r --all
-"${MODAPP_PATH}/images/anaconda/2/bin/conda" install -yc https://conda.binstar.org/r r-base r-irkernel
-./Anaconda3-2.5.0-Linux-x86_64.sh -bp "${MODAPP_PATH}/images/anaconda/3"
-"${MODAPP_PATH}/images/anaconda/3/bin/conda" update -y conda
-"${MODAPP_PATH}/images/anaconda/3/bin/conda" update -y anaconda
-"${MODAPP_PATH}/images/anaconda/3/bin/conda" update -yc https://conda.binstar.org/r --all
-"${MODAPP_PATH}/images/anaconda/3/bin/conda" install -yc https://conda.binstar.org/r r-base r-irkernel
+rm -r "${1}/images/anaconda"
+./Anaconda2-2.5.0-Linux-x86_64.sh -bp "${1}/images/anaconda/2"
+"${1}/images/anaconda/2/bin/conda" update -y conda
+"${1}/images/anaconda/2/bin/conda" update -y anaconda
+"${1}/images/anaconda/2/bin/conda" update -yc https://conda.binstar.org/r --all
+"${1}/images/anaconda/2/bin/conda" install -yc https://conda.binstar.org/r r-base r-irkernel
+./Anaconda3-2.5.0-Linux-x86_64.sh -bp "${1}/images/anaconda/3"
+"${1}/images/anaconda/3/bin/conda" update -y conda
+"${1}/images/anaconda/3/bin/conda" update -y anaconda
+"${1}/images/anaconda/3/bin/conda" update -yc https://conda.binstar.org/r --all
+"${1}/images/anaconda/3/bin/conda" install -yc https://conda.binstar.org/r r-base r-irkernel
 popd
