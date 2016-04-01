@@ -1,0 +1,12 @@
+#%Module 1.0
+
+set app ncbi-tools++
+set version 2.3.0
+set modroot $::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path PATH $modroot/bin
+append-path CPATH $modroot/include
+append-path CPATH $modroot/include/ncbi-tools++
+
+prereq boost xerces
+conflict $app
