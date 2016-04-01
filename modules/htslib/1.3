@@ -1,0 +1,13 @@
+#%Module 1.0
+
+set	app		htslib
+set	version		1.3
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+append-path	PATH		$modroot/bin
+append-path	MANPATH		$modroot/share/man
+append-path	CPATH		$modroot/include
+append-path	LIBRARY_PATH	$modroot/lib
+append-path	LD_LIBRARY_PATH	$modroot/lib
+
+conflict	$app
