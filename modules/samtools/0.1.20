@@ -1,11 +1,11 @@
 #%Module 1.0
 
-set	app		samtools
-set	version		0.1.20
-set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+set app	samtools
+set version 0.1.20
+set modroot $::env(MODIMAGE_PATH)/$app/$version
 
-append-path	PATH		$modroot/bin
-append-path	CPATH		$modroot/include
+prepend-path PATH $modroot/bin
+append-path CPATH $modroot/include
 
-conflict	$app
-conflict	bcftools
+conflict $app
+conflict bcftools
