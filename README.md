@@ -22,10 +22,9 @@ not redistributable.
 2. Many modules provided are compiled against some libraries carried by
    Anaconda, so you must load one of the Anaconda Python module first.
 
-   If you are mainly using Python 2, use "anaconda/2". Module "anaconda/3"
-   provides Python 3 only. Both provide both Python 2 and 3, but the default
-   version is different. Specific versions can be accessed through "python2"
-   and "python3", respectively.
+   If you are mainly using Python 2, use "anaconda/2". Both provide both
+   Python 2 and 3, but the default versions are different. Specific versions
+   can be accessed through "python2" and "python3", respectively.
 
    Say you want to use Python 2, add the following line to your .bashrc file:
    ```
