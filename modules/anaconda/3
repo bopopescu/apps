@@ -30,3 +30,5 @@ append-path     CPATH           $modroot/include
 append-path     CPATH		$modroot/include/ncurses
 append-path     LD_LIBRARY_PATH $modroot/lib
 append-path     LD_RUN_PATH     $modroot/lib
+
+conflict $app
