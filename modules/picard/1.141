@@ -1,0 +1,10 @@
+#%Module 1.0
+
+set	app		picard
+set	version		1.141
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+set-alias	picard	"java -jar $modroot/picard.jar"
+
+conflict	$app
+prereq		jdk/1.7 jre/1.7

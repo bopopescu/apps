@@ -1,0 +1,21 @@
+<h3 id="CollectHsMetrics">CollectHsMetrics</h3>
+<section>
+<p>Collects a set of Hybrid Selection specific metrics from an aligned SAMor BAM file. If a reference sequence is provided, AT/GC dropout metrics will be calculated, and the PER_TARGET_COVERAGE option can be used to output GC and mean coverage information for every target.</p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td>BAIT_INTERVALS (File)</td><td>An interval list file that contains the locations of the baits used.  Default value: null. This option must be specified at least 1 times. </td></tr>
+<tr><td>BAIT_SET_NAME (String)</td><td>Bait set name. If not provided it is inferred from the filename of the bait intervals.  Default value: null. </td></tr>
+<tr><td>MINIMUM_MAPPING_QUALITY (Integer)</td><td>Minimum mapping quality for a read to contribute coverage.  Default value: 20. This option can be set to 'null' to clear the default value. </td></tr>
+<tr><td>MINIMUM_BASE_QUALITY (Integer)</td><td>Minimum base quality for a base to contribute coverage.  Default value: 20. This option can be set to 'null' to clear the default value. </td></tr>
+<tr><td>CLIP_OVERLAPPING_READS (Boolean)</td><td>True if we are to clip overlapping reads, false otherwise.  Default value: true. This option can be set to 'null' to clear the default value. Possible values: {true, false} </td></tr>
+<tr><td>TARGET_INTERVALS (File)</td><td>An interval list file that contains the locations of the targets.  Default value: null. This option must be specified at least 1 times. </td></tr>
+<tr><td>INPUT (File)</td><td>An aligned SAM or BAM file.  Required. </td></tr>
+<tr><td>OUTPUT (File)</td><td>The output file to write the metrics to.  Required. </td></tr>
+<tr><td>METRIC_ACCUMULATION_LEVEL (MetricAccumulationLevel)</td><td>The level(s) at which to accumulate metrics.  Default value: [ALL_READS]. This option can be set to 'null' to clear the default value. Possible values: {ALL_READS, SAMPLE, LIBRARY, READ_GROUP} This option may be specified 0 or more times. This option can be set to 'null' to clear the default list. </td></tr>
+<tr><td>PER_TARGET_COVERAGE (File)</td><td>An optional file to output per target coverage information to.  Default value: null. </td></tr>
+<tr><td>PER_BASE_COVERAGE (File)</td><td>An optional file to output per base coverage information to. The per-base file contains one line per target base and can grow very large. It is not recommended for use with large target sets.  Default value: null. </td></tr>
+<tr><td>NEAR_DISTANCE (Integer)</td><td>The maximum distance between a read and the nearest probe/bait/amplicon for the read to be considered 'near probe' and included in percent selected.  Default value: 250. This option can be set to 'null' to clear the default value. </td></tr>
+<tr><td>COVERAGE_CAP (Integer)</td><td>Parameter to set a max coverage limit for Theoretical Sensitivity calculations. Default is 200.  Default value: 200. This option can be set to 'null' to clear the default value. </td></tr>
+<tr><td>SAMPLE_SIZE (Integer)</td><td>Sample Size used for Theoretical Het Sensitivity sampling. Default is 10000.  Default value: 10000. This option can be set to 'null' to clear the default value. </td></tr>
+</table>
+</section>

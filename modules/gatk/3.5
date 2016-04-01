@@ -1,0 +1,11 @@
+#%Module 1.0
+
+set	app		gatk
+set	version		3.5
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+set-alias	gatk	"java -jar $modroot/GenomeAnalysisTK.jar"
+
+conflict	$app
+prereq		jdk jre
+conflict	jdk/1.7 jre/1.7

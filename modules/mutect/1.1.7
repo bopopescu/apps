@@ -1,0 +1,10 @@
+#%Module 1.0
+
+set	app		mutect
+set	version		1.1.7
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+set-alias	mutect	"java -jar $modroot/mutect-$version.jar -T MuTect"
+
+conflict	$app
+prereq		jdk/1.7 jre/1.7
