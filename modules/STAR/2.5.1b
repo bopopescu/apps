@@ -1,0 +1,9 @@
+#%Module 1.0
+
+set app STAR
+set version 2.5.1b
+set modroot $::env(MODIMAGE_PATH)/$app/$version
+
+append-path PATH $modroot
+
+conflict $app

@@ -1,0 +1,9 @@
+#%Module 1.0
+
+set app bowtie
+set version 1.1.2
+set modroot $::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path PATH $modroot/bin
+
+conflict $app
