@@ -1,0 +1,865 @@
+#!/home/zhanghj/apps/images/python/anaconda2/bin/python2.7
+
+# gtoinfo -- a GeneTorrent Secret Decoder Ring,
+# based in part on "A Simple BitTorrent 'bencode' Decoder" by Fredrik Lundh.
+#
+################################################################################
+# 
+# Copyright 2011 Annai Systems, Inc.   All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without modification, 
+# are permitted provided that the following conditions are met:
+# 
+#    1. Redistributions of source code must retain the above copyright notice, 
+#       this list of conditions and the following disclaimer.
+# 
+#    2. Redistributions in binary form must reproduce the above copyright notice, 
+#       this list of conditions and the following disclaimer in the documentation 
+#       and/or other materials provided with the distribution.
+# 
+# THIS SOFTWARE IS PROVIDED BY ANNAI SYSTEMS ''AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL <COPYRIGHT HOLDER> OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+# EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# 
+# The views and conclusions contained in the software and documentation are those 
+# of the authors and should not be interpreted as representing official policies, 
+# either expressed or implied, of Annai Systems, Inc.
+#
+# Lundh's 2007 source is online at: http://effbot.org/zone/bencode.htm
+# His tokenizer(), decode_item() and decode() functions are unmodified.
+# With all due credit and blame to Bram Cohen, BitTorrent's evil genius.  
+#
+################################################################################
+#
+# Authors for Annai Systems: Dan Murphy, Howdy Pierce
+#
+# Version 0.1.5.0 (24 Jan 2012) added:
+# - Added the --set-key option, and factored code to use it correctly
+# - Renamed the --inspect option to --get-key for consistency (we'll
+#     keep --inspect for compatibility for now though)
+# - Made it so that multiple --get-key arguments can be specified on a
+#     single command line
+# - Added the --list-files option
+#
+# Version 0.1.4.0 (5 Jan 2012) added:
+# - Much richer specifications for the --expires option
+#
+# Version 0.1.3.0 (18 Nov 2011) added:
+# - Support for the --raw-time, --get-expire, --infohash options
+# - Support for adding and modifying the ssl-cert (--ssl-cert option)
+# - Better error handling / error output
+#
+# Version 0.1.2.0 (26 Oct 2011) added:
+# - Support for modifying GTO files; support for --piece, --announce,
+#   and --expires options
+# - support for multiple GTO files being processed simultaneously
+# - added --total_size option
+#
+# Version 0.1.1.0 (20 Oct 2011) added:
+# - correct --version / -V command line behavior
+# - short-form command lines options across the board
+# - replaced gto_decode with format(), a dictionary pretty-printer 
+#
+# Version 0.1.0.0 (19 Oct 2011) added:
+# - semantic detail on the content of GTO files 
+# - a profusion of comments on the Lundh source 
+# - a "main"-like block of code at the bottom 
+# - command line argument processing (argparse)
+# - a simple dictionary formatting function
+#
+################################################################################
+
+# Current version
+revlevel = '3.8.7'
+
+# imports
+import re
+from optparse import OptionParser
+from collections import deque
+from socket import gethostname
+import binascii
+import os
+import sys
+import shutil
+import time
+import errno
+
+# hashlib came along in Python 2.5, and we want to support 2.4.  
+try:
+    from hashlib import sha1 as hash_sha1
+except ImportError:
+    from sha import new as hash_sha1
+
+# tokenize()
+# A generator function that actually returns a tokenizer object with an 
+# inherited next() function controlling the execution of iterations.
+#
+# Inputs:
+# - text: the block of data to be tokenized (required)
+# - match: a reference to a pattern object's match() function (optional)
+#
+# FL's tokenizer() handles the 4 atomic token types defined for bencoded data:
+# - integers (decimal digits): 
+#   formatted "i<value>e" where 
+#      <value> is a string of ASCII characters 
+# - binary strings (bstrings):  
+#   formatted "<length>:<bytes>" where 
+#      <length> is a string of ASCII characters 
+#      <bytes> is a run of <length> binary octets
+# - lists (containers): 
+#   formatted "l<item>...e" where 
+#      one or more <item> members constitute the list
+#      each <item> may be any of the four token types (including lists)
+# - dicts (containers): 
+#   formatted "d<key><value>...e" where 
+#      one or more <key><value> pairs constitute the dictionary
+#      each <key> or <value> may be any of the four token types (including dicts)
+#
+# What's the weird construct in the function definition's second "input parameter"? 
+# It compiles an implicit pattern object and keeps a reference to the match() method.
+# In theory, this function could be called with an explicit reference to a different 
+# pattern's match() method, but I wouldn't try it.  I think it cannot be moved to the
+# body of the function because of re-entrancy issues with "static" generator objects.
+#
+# The regex pattern Fredrick implemented here is in the form of three alternative clauses:
+# - "([idle])" matches a bencoded integer or container token start and end characters 
+# - "(\d+):" matches the starting "<length>:" component of a bstring (no start character)
+# - "(-?\d+)" matches one or more digits, possibly preceded by a minus sign (i.e., an int) 
+#
+# Once "match" and "i" are defined, we seem to iterates over "text" calling "match", BUT...
+#
+# Iterations are actually controlled by the caller, who gets a "tokenizer" object back on 
+# the first invocation, then calls the object's inherited next() function to get another 
+# token.  See the use of src and next in the decode() and decode_item() functions below.
+#
+# In the body of the function (really, implementing the object's next() function): 
+#   m is None or a match object from the compiled pattern object's match() function; 
+#   s is the matched substring, if any; we may throw an exception here if m is "None".
+#   i is the value of the offset where the matching should start on the next go-round. 
+#   To simplify decode_item(), a bstring token is yielded in the format: "s<substring>" 
+#   All other token types are yielded as the substring returned by the m.group() method.
+#
+def tokenize(text, match=re.compile("([idle])|(\d+):|(-?\d+)").match):
+    i = 0
+    while i < len(text):
+        m = match(text, i)
+        if (not m and text[i:].isspace()):
+            # this allows trailing whitespace, which is common if a
+            # GTO file was edited by hand
+            break
+        s = m.group(m.lastindex)
+        i = m.end()
+        # create a metatoken for bstrings
+        if m.lastindex == 2:
+            yield "s"
+            yield text[i:i+int(s)]
+            i = i + int(s)
+        else:
+            yield s
+
+# decode_item()
+# This function implements logic to decode the four basic data bencode token types
+# It recursively calls the tokenizer's next() call to parse dictionaries and lists 
+#
+# Inputs: 
+# - next: a reference to the tokenizer.next() function
+# - token: the token to be decoded (i,s,d or s).
+#
+# Recursively parses the "next" tokens for containers
+# Note the conversion of a data list into a dict(zip())
+# Special GTO semantics handling is provided elsewhere
+#
+def decode_item(next, token):
+    if token == "i":
+        # integer: "i" value "e"
+        data = int(next())
+        if next() != "e":
+            raise ValueError
+    elif token == "s":
+        # string: "s" value (virtual tokens)
+        data = next()
+    elif token == "l" or token == "d":
+        # container: "l" or "d" values "e"
+        data = []
+        tok = next()
+        while tok != "e":
+            data.append(decode_item(next, tok))
+            tok = next()
+        if token == "d":
+            data = dict(zip(data[0::2], data[1::2]))
+    else:
+        raise ValueError
+    return data
+
+# decode()
+# Top-level bencode decoder logic
+#
+# Inputs:
+# - text: bencoded text
+#
+# Outputs:
+# - data: tokenized and decoded data
+def decode(text):
+    try:
+        src = tokenize(text)
+        data = decode_item(src.next, src.next())
+        for token in src: # look for more tokens
+            raise SyntaxError("Invalid GTO file")
+    except (AttributeError, ValueError, StopIteration):
+        raise SyntaxError("Invalid GTO file")
+    return data
+
+# format()
+# Special GTO dictionary pretty-printer
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+# - params: options passed in from command line
+# - tabs: modifiable counter controlling indents
+#
+# Outputs:
+# - s: a string reprsentation of the data dict
+#
+def format(data, params, tabs=0):
+    indent='  '
+    s = ['{\n']
+    for k,v in sorted(data.items()):
+        # Handle dictionaries by recursion
+        if isinstance(v, dict):
+            v = format(v, params, tabs+1)
+            s.append('%s%r: %s,\n' % (indent*tabs, k, v))
+        # Handle lists 
+        elif isinstance(v, list):
+            for e in v:
+                if isinstance(e, dict):
+                    e = format(e, params, tabs+1)
+                    s.append('%s%r: %s,\n' % (indent*(tabs), k, e))
+                else:
+                    e = repr(e)
+                    s.append('%s%r: %s,\n' % (indent*(tabs), k, e))
+        elif (params.raw_time is False and (k == 'creation date' or k == 'expires on')):
+            # Special handling for timestamp
+            v = time.strftime("%a, %d %b %Y %H:%M:%S %Z", time.localtime(v)) 
+            s.append('%s%r: %s,\n' % (indent*tabs, k, v))
+        elif k == 'pieces':
+            # Special handling for SHA-1 hashes
+            v = int(len(v)/20.0)
+            s.append('%s%r: %s,\n' % (indent*tabs, k, v))
+        else:
+            v = repr(v)
+            s.append('%s%r: %s,\n' % (indent*tabs, k, v))
+    s.append('%s}' % (indent*tabs))
+    return ''.join(s)
+
+
+# inspect_key()
+# returns the value of a particular key from the GTO file
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+# - key: key to retrieve
+# - params: options passed in from command line
+#
+# Outputs:
+# - s: a string representation of the requested key, or an error message
+#
+def inspect_key(data, key, params):
+    if (key not in data):
+        return "Key %s not found" % key
+    if (params.raw_time is False and (key == 'creation date' or key == 'expires on')):
+        # Special handling for timestamp
+        return time.strftime("%a, %d %b %Y %H:%M:%S %Z", time.localtime(data[key])) 
+    elif (isinstance(data[key], str)):
+        return data[key]
+    else:
+        return repr(data[key])
+
+
+# encode_int()
+#
+# bencodes the input integer
+#
+# Inputs:
+# - num: a python int
+#
+# Outputs:
+# - the bencoded string
+def encode_int(num):
+    if (not isinstance(num, int) and not isinstance(num, long)):
+        raise ValueError('Expected integer or long, got %s' % type(data))
+    return ("i%de" % num)
+
+
+# encode_string()
+#
+# bencodes the input string
+#
+# Inputs:
+# - string: a python string
+#
+# Outputs:
+# - the bencoded string
+def encode_string(string):
+    if (not isinstance(string, str)):
+        raise ValueError('Expected string, got %s' % type(data))
+    return ("%d:%s" % (len(string), string))
+
+
+# encode_list()
+#
+# bencodes the input GTO list
+#
+# Inputs:
+# - data: a GTO list
+#
+# Outputs:
+# - text: the bencoded string
+def encode_list(data):
+    if (not isinstance(data, list)):
+        raise ValueError('Expected list, got %s' % type(data))
+    text="l"
+    for v in data:
+        if isinstance(v, dict):
+            text += encode_dict(v)
+        elif isinstance(v, list):
+            text += encode_list(v)
+        elif isinstance(v, str):
+            text += encode_string(v)
+        elif isinstance(v, int) or isinstance(v, long):
+            text += encode_int(v)
+        else:
+            raise ValueError('Unsupported type: %s' % type(v))
+    text += "e"
+    return text
+
+
+# encode_dict()
+#
+# bencodes the GTO dictionary 
+#
+# Inputs:
+# - data: a GTO dictionary
+#
+# Outputs:
+# - text: the bencoded string
+def encode_dict(data):
+    if (not isinstance(data, dict)):
+        raise ValueError('Expected dictionary, got %s' % type(data))
+    text="d"
+    for k,v in sorted(data.items()):
+        text += encode_string(k)
+        if isinstance(v, dict):
+            text += encode_dict(v)
+        elif isinstance(v, list):
+            text += encode_list(v)
+        elif isinstance(v, str):
+            text += encode_string(v)
+        elif isinstance(v, int) or isinstance(v, long):
+            text += encode_int(v)
+        else:
+            raise ValueError('Unsupported type: %s' % type(v))
+    text += "e"
+    return text
+
+
+# emit_gto()
+#
+# Encodes the GTO dictionary and saves it to a file.  If the file
+# already exists, it is backed up to "filename~" prior to being
+# overwritten.
+#
+# Inputs:
+# - gtodict: top-level GTO dictionary from decode()
+# - filename: the file to write
+# - backup: if True and the file already exists, a backup copy will be written
+#
+def emit_gto(gtodict, filename, backup):
+    encoded_text = encode_dict(gtodict)
+
+    # in order to make the writing of the file atomic, we write into a
+    # tmp file and then move it to the real deal.
+    procid = os.getpid()
+    hostname = gethostname()
+    tmp_file = "%s.%s.%s.tmp" % (filename, hostname, procid)
+
+    f = open(tmp_file, "wb")
+    f.write(encoded_text)
+    f.close()
+
+    try:
+        stat = os.stat(filename)
+        os.chmod(tmp_file, stat.st_mode)
+        os.chown(tmp_file, -1, stat.st_gid)  # maybe we can preserve the original group?
+    except Exception:
+        sys.exc_clear()
+
+    # move the filename to a backup location, if it exists
+    if (backup):
+        try:
+            shutil.move(filename, filename+"~")
+        except IOError, e:
+            # if e.errno is ENOENT, filename didn't exist
+            if e.errno != errno.ENOENT:
+                raise
+
+    # move the tmp file into place
+    shutil.move(tmp_file, filename)
+
+
+# compute_size()
+# Iterates across all the files in the GTO dictionary and sums their sizes
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+#
+# Outputs: 
+# - size: an int representing the cumulative length of the files in this GTO
+# dictionary
+#
+def compute_size(data):
+    try:
+        filelist=data['info']['files']
+        size=0
+        for node in filelist:
+            size += node['length']
+    except (KeyError):
+        raise ValueError
+    return size
+
+
+# piece_hash()
+# Returns the hash, in binary form, for the requested piece
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+# - piece_index: the index of the requested piece
+#
+# Outputs: 
+# - hash: hex version of the requested piece
+#
+def piece_hash(data, piece_index):
+    try:
+        pieces=data['info']['pieces']
+        num_pieces = len(pieces)/20 - 1
+        if (piece_index > num_pieces):
+            raise ValueError('Invalid piece index %d (expected 0 - %d)' 
+                             % (piece_index, num_pieces))
+        st=piece_index * 20
+        end=st+20
+        return pieces[st:end]
+    except (KeyError):
+        raise ValueError('Bad GTO structure')
+
+
+# infohash()
+# Returns the infohash, in printable hexadecimal, for the given GTO file
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+#
+# Outputs: 
+# - hash: printable hex version of the infohash
+#
+def infohash(data):
+    inf = encode_dict(data['info'])
+    return hash_sha1(inf).hexdigest()
+
+
+# piece_length()
+# Returns the piece_length for the given GTO file
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+#
+# Outputs: 
+# - piece_length
+#
+def piece_length(data):
+    return data['info']['piece length']
+
+
+# find_piece_bytes()
+#
+# From start_piece to end_piece, returns a list of where the bytes for
+# that piece can be found.  
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+# - start_index: first piece number, indexed from 0
+# - end_index: last piece number
+#
+# Outputs: 
+# The structure returned is a list of lists of lists
+# Top level list: one list per piece
+#   per-piece list: list of file chunks
+#     file-chunk list: filename, start offset, num bytes
+#
+def find_piece_bytes(data, start_index, end_index):
+    # validate start_piece and end_piece
+    pieces=data['info']['pieces']
+    num_pieces = len(pieces)/20 - 1
+    if (start_index > num_pieces):
+        raise ValueError('Invalid piece index %d (expected 0 - %d)' 
+                         % (start_index, num_pieces))
+    if (end_index > num_pieces + 1):
+        raise ValueError('Invalid piece index %d (expected 0 - %d)' 
+                         % (end_index, num_pieces))
+    if (start_index >= end_index):
+        raise ValueError('Start index %d is greater than end index %d'
+                         % (start_index, end_index))
+
+    plen = piece_length(data)
+    start_offset = start_index * plen
+    end_offset = end_index * plen
+
+    dirname = data['info']['name']
+    files = deque(data['info']['files'])
+    cur_file = files.popleft()
+    cur_file_offset = 0  # the offset of the first byte of the current file
+
+    # skip thru files until we get to the first file
+    while (cur_file_offset + cur_file['length'] < start_offset):
+        cur_file_offset += cur_file['length']
+        cur_file = files.popleft()
+        
+    # ok, cur_file contains part of the first piece.  Start processing
+    top_list = list()
+    while (start_offset < end_offset):
+        piece_list = list()
+        piece_bytes_consumed = 0
+        while (piece_bytes_consumed < plen):
+            fn = "%s/%s" % (dirname, "/".join(cur_file['path']))
+            st = start_offset + piece_bytes_consumed - cur_file_offset
+            if (plen - piece_bytes_consumed < cur_file['length'] - st):
+                sz = plen - piece_bytes_consumed
+            else:
+                # need to advance to next file if there is one
+                sz = cur_file['length'] - st
+                cur_file_offset += cur_file['length']
+                if (len(files) == 0):
+                    piece_list.append([fn, st, sz])
+                    break
+                cur_file = files.popleft()
+
+            piece_list.append([fn, st, sz])
+            piece_bytes_consumed += sz
+                
+        top_list.append(piece_list)
+        start_offset += plen
+
+    return top_list
+
+
+# list_files()
+# Returns the files contained within this GTO file, with their sizes
+#
+# Inputs:
+# - data: top-level GTO dictionary from decode()
+#
+# Outputs: 
+# - ASCII file listing
+#
+def list_files(data):
+    try:
+        file_list = list()
+        dirname = data['info']['name']
+        for f in data['info']['files']:
+            file_list.append("%s/%s %d" % (dirname, "/".join(f['path']), f['length']))
+        return "\n".join(file_list)
+    except (KeyError):
+        raise ValueError('Bad GTO structure')
+
+
+# set_key()
+#
+# Modifies gtodict, adding or modifying the specified key to the
+# specified value
+#
+# Inputs:
+# - gtodict: top-level GTO dictionary from decode()
+# - key: the key
+# - value: the value
+#
+# Outputs:
+# - the gtodict is modified
+# - returns True if the gtodict was modified, false otherwise
+def set_key(gtodict, key, value):
+    retval = False
+    if (not (key in gtodict and gtodict[key] == value)):
+        gtodict[key] = value
+        retval = True
+
+    return retval
+
+
+# read_gto()
+#
+# Reads in a GTO file and returns the gtodict structure
+#
+# Inputs:
+# - gto_filename: the file to read in
+#
+# Outputs:
+# - the gtodict
+#
+def read_gto(gto_filename):
+    bencode_text = open(gto_filename, "rb").read()
+    gtodict = decode(bencode_text)
+    if (not ('info' in gtodict)):
+        raise ValueError('Bad GTO structure')
+    return gtodict
+    
+
+# is_output()
+#
+# Returns True if the cmd line options cause output to be emitted to
+# the screen, False otherwise
+#
+# Inputs:
+# - params: the command line parameters
+def is_output(params):
+    retval = False
+    if (params.decode_file or params.piece_index != -1 or params.find_piece_index != -1 
+        or params.inspect_key != None or params.get_expire is True or params.infohash is True 
+        or params.list_files is True or params.piece_length is True):
+        retval = True
+    return retval
+
+
+# process()
+#
+# Does the main work of the program
+#
+# Inputs:
+# - params: the command line parameters
+# - gto_filenames: the GTO files listed on the cmd line
+#
+def process(params, gto_filenames):
+    cum_size = 0
+
+    # whether the GTO filenames are printed out.  Currently this gets set
+    # to True if (a) there is any file output, and also (b) there is more
+    # than one GTO file being processed.
+    print_gto_filenames = False
+    if (len(gto_filenames) > 1 and is_output(params)):
+        print_gto_filenames = True
+
+    for gto_filename in gto_filenames:
+        gto_file_changed = False
+
+        gtodict = read_gto(gto_filename)
+
+        # Modify it as needed
+        if (params.announce_url != ''):
+            gto_file_changed = set_key(gtodict, 'announce', params.announce_url)
+
+        if (params.expiry != ''):
+            m = re.match("^([0-9]+)(.?)$", params.expiry)
+            if (not m):
+                raise SyntaxError('Invalid expiry value: %s' % params.expiry)
+            expiry_arg = int(m.group(1))
+            expiry_type = m.group(2)
+            if (expiry_arg <= 0):
+                raise SyntaxError('Invalid expiry argument %d in %s' % (expiry_arg, params.expiry))
+
+            if (expiry_type == 's'):
+                # user specified result in seconds
+                expiry = time.time() + expiry_arg
+            elif (expiry_type == 'm'):
+                # user specified result in minutes
+                expiry = time.time() + (expiry_arg * 60)
+            elif (expiry_type == 'h'):
+                # user specified result in hours
+                expiry = time.time() + (expiry_arg * 3600)
+            elif (expiry_type == 'd'):
+                # user specified result in days
+                expiry = time.time() + (expiry_arg * 3600 * 24)
+            elif (expiry_type == '' and expiry_arg < 8760):
+                # user did not specify type, and int is one year or
+                # less; treat as relative offset from now, in hours
+                expiry = time.time() + (expiry_arg * 3600)
+            elif (expiry_type == ''):
+                # treat as absolute time as Unix time stamp
+                expiry = expiry_arg
+            else:
+                raise SyntaxError('Invalid expiry type %s: %s' % (expiry_type, params.expiry))
+
+            gto_file_changed = set_key(gtodict, 'expires on', int(expiry))
+
+        if (params.ssl_cert != ''):
+            cert_text = open(params.ssl_cert, "rb").read()
+            if (not ('ssl-cert' in gtodict['info'] and gtodict['info']['ssl-cert'] == cert_text)):
+                gtodict['info']['ssl-cert'] = cert_text
+                gto_file_changed = True
+
+        if (params.remove_ssl_cert):
+            if ('ssl-cert' in gtodict['info']):
+                del gtodict['info']['ssl-cert']
+                gto_file_changed = True
+
+        if (params.set_key != None):
+            (k, v) = params.set_key
+            gto_file_changed = set_key(gtodict, k, v)
+
+        # Print the output requested
+        if (print_gto_filenames):
+            print ("%s: " % gto_filename),
+
+        if (params.decode_file):
+            print format(gtodict, params)
+
+        if (params.inspect_key != None):
+            for key in params.inspect_key:
+                print inspect_key(gtodict, key, params)
+
+        if (params.get_expire):
+            if (not ('expires on' in gtodict)):
+                # No expires on, use Jan 1, 2037
+                print 2114406000
+            else:
+                print gtodict['expires on'] 
+
+        if (params.total_size):
+            cum_size += compute_size(gtodict)
+
+        if (params.piece_index != -1):
+            print "%s" % binascii.b2a_hex(piece_hash(gtodict, params.piece_index))
+
+        if (params.find_piece_index != -1):
+            r = find_piece_bytes(gtodict, params.find_piece_index, params.find_piece_index+1)
+            for file_chunk in r[0]:
+                print "%s, offset %d, size %d" % (file_chunk[0], file_chunk[1], file_chunk[2])
+
+        if (params.infohash):
+            print infohash(gtodict)
+
+        if (params.list_files):
+            print list_files(gtodict)
+
+        if (params.piece_length):
+            print piece_length(gtodict)
+
+        if (gto_file_changed):
+            emit_gto(gtodict, gto_filename, (not params.no_backup))
+
+    if (params.total_size):
+        print cum_size
+
+# main()
+#
+# Parses the cmd line options and then calls process() to process each
+# GTO file
+#
+# Return the exit code
+def main():
+    # Parse the command line parameters
+    parser = OptionParser(description='Manipulate a GTO file.', 
+                          version=("%%prog %s" % revlevel),
+                          usage="usage: %prog [options] gtofile [gtofile ...]")
+
+    # arguments that simply print to stdout
+
+    parser.add_option('-d', '--decode', action='store_true', 
+                      default=False, dest='decode_file',
+                      help='Pretty-print the contents of the GTO files, without hashes')
+
+    parser.add_option('-f', '--find-piece', action='store', 
+                      default=-1, dest='find_piece_index', metavar='INDEX', type=int,
+                      help='Show the file bytes that comprise a given piece')
+
+    parser.add_option('-g', '--get-key', '--inspect', action='append', 
+                      default=None, dest='inspect_key', metavar='KEY',
+                      help='Print just a particular key')
+
+    parser.add_option('--infohash', action='store_true', 
+                      default=False, dest='infohash', 
+                      help='Show the infohash for this GTO file')
+
+    parser.add_option('--list-files', action='store_true', 
+                      default=False, dest='list_files', 
+                      help='List the files contained in this GTO file, with their sizes')
+
+    parser.add_option('-p', '--piece-hash', action='store', 
+                      default=-1, dest='piece_index', metavar='INDEX', type=int,
+                      help='Show the SHA-1 hash for one piece')
+
+    parser.add_option('--piece-length', action='store_true', 
+                      default=False, dest='piece_length',
+                      help='Show the piece length for this GTO')
+
+    parser.add_option('-r', '--raw-time', action='store_true',
+                      default=False, dest='raw_time',
+                      help='Print all time/date values seconds-since-Unix-epoch')
+
+    parser.add_option('-t', '--total-size', action='store_true', 
+                      default=False, dest='total_size',
+                      help='Print the total size of the files, in bytes')
+
+    parser.add_option('-x', '--get-expire', action='store_true', 
+                      default=False, dest='get_expire', 
+                      help='Extract GTO "expires on" time as time since epoch')
+
+    # arguments that cause the file to be modified
+
+    parser.add_option('--no-backup', action='store_true', 
+                      default=False, dest='no_backup',
+                      help='Don\'t store a backup copy of the GTO before modifying it. (By default, GTOs are backed up to gtoname~ before being modified.)')
+
+    parser.add_option('-a', '--announce', action='store', 
+                      default='', dest='announce_url',
+                      help='Add or modify the announce URL')
+
+    parser.add_option('-e', '--expires', action='store', 
+                      default="", dest='expiry', 
+                      help='Add or modify the expiration date. EXPIRY is specified in hours from now; or it specifies the absolute expiration time in seconds since the epoch on %s; or, in the form (number)[smhd], it specifies the expiration time in seconds, minutes, hours, or days from now.' % time.strftime("%d %b %Y %H:%M:%S %Z", time.gmtime(0)))
+
+    parser.add_option('-s', '--ssl-cert', action='store', 
+                      default="", dest='ssl_cert', 
+                      help='Add or modify the SSL certificate. SSL_CERT should be a file containing an SSL certificate in PEM format.')
+
+    parser.add_option('--remove-ssl-cert', action='store_true',
+                      default=False, dest='remove_ssl_cert',
+                      help='Remove the SSL certificate.')
+
+    parser.add_option('', '--set-key', action='store', nargs=2,
+                      default=None, dest='set_key', metavar='KEY VALUE',
+                      help='Add or modify the specified key, setting it to value.')
+
+    (params, gto_filenames) = parser.parse_args()
+
+    if (len(gto_filenames) == 0):
+        parser.print_help()
+        return 1
+
+    if (params.decode_file is False and params.total_size is False and params.inspect_key == None
+        and params.find_piece_index == -1 and params.piece_index == -1 
+        and params.announce_url == "" and params.expiry == "" and params.get_expire is False 
+        and params.infohash is False and params.list_files is False 
+        and params.piece_length is False and params.ssl_cert == "" and params.set_key == None
+        and params.remove_ssl_cert is False):
+        params.decode_file = True
+
+    try:
+        process(params, gto_filenames)
+    except:
+        print "Error:", sys.exc_info()[1]
+        return 1
+
+    return 0
+
+
+# Check the python version for compatability.  Python 3 is not
+# backward compatible.
+if sys.version_info[0] != 2 or sys.version_info[1] < 4:
+    print("This script requires Python version 2.4 or later")
+    sys.exit(1)
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,13 @@
+#%Module 1.0
+
+set	app		xqilla
+set	version		2.3.2
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path	PATH		$modroot/bin
+append-path	CPATH		$modroot/include
+append-path	LD_LIBRARY_PATH	$modroot/lib
+append-path	LD_RUN_PATH	$modroot/lib
+setenv		with_xqilla 	$modroot
+
+conflict	$app
