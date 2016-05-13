@@ -1,0 +1,11 @@
+#%Module 1.0
+
+set	app		MELT
+set	version		1.2.20
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+set-alias	melt	"java -jar $modroot/MELT.jar"
+set-alias	MELT	"java -jar $modroot/MELT.jar"
+
+conflict	$app
+prereq		jdk jre
