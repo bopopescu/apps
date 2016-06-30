@@ -1,0 +1,10 @@
+#%Module 1.0
+
+set	app		google-cloud-sdk
+set	version		116.0.0
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path	PATH		$modroot/bin
+append-path     MANPATH     $modroot/help/man
+
+conflict	$app
