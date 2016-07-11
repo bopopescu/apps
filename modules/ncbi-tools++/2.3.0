@@ -7,6 +7,7 @@ set modroot $::env(MODIMAGE_PATH)/$app/$version
 prepend-path PATH $modroot/bin
 append-path CPATH $modroot/include
 append-path CPATH $modroot/include/ncbi-tools++
+append-path LD_LIBRARY_PATH $modroot/lib
 
 prereq boost xerces
 conflict $app
