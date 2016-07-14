@@ -1,0 +1,9 @@
+#%Module 1.0
+
+set app tophat
+set version 2.1.1
+set modroot $::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path PATH $modroot/bin
+
+conflict $app
