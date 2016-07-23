@@ -1,0 +1,285 @@
+#!/usr/bin/env perl
+
+# contributed by Brian Haas, Broad Institute, 2015
+
+use strict;
+use warnings;
+use Carp;
+use Cwd;
+use FindBin;
+use lib ("$FindBin::Bin/lib");
+use Pipeliner;
+use Set::IntervalTree;
+use File::Basename;
+use Process_cmd;
+
+use Getopt::Long qw(:config posix_default no_ignore_case bundling pass_through);
+
+my $VERSION = "0.7.0";
+
+
+my $UTILDIR = "$FindBin::Bin/util";
+
+## Options
+my $output_dir = "";
+my $out_prefix = "star-fusion";
+my $chimeric_junction_file;
+my $help_flag;
+my $MIN_NOVEL_JUNCTION_SUPPORT = 3;
+my $MIN_ALT_PCT_JUNCTION = 10.0;
+my $AGGREGATE_NOVEL_JUNCTION_DIST = 5;
+my $Evalue = 1e-3;
+my $tmpdir = "/tmp";
+my $verbose_level = 2;
+my $MIN_JUNCTION_READS = 1;
+my $MIN_SUM_FRAGS = 2;
+my $MAX_PROMISCUITY = 3;  # perhaps a poor choice of words, but still a best fit IMHO.
+my $genome_lib_dir;
+
+
+my $usage = <<__EOUSAGE__;
+
+
+###################################################################################
+#
+#  Required:
+#
+#  To include running STAR:
+#
+#      --left_fq <string>                    left.fq file
+#
+#      --right_fq <string>                   right.fq file  (actually optional, but highly recommended)
+#
+#  Or use output from earlier STAR run:
+#
+#      --chimeric_junction|J <string>        Chimeric.out.junction file
+#
+#
+#    --genome_lib_dir <string>             directory containing genome lib (see http://STAR-Fusion.github.io)
+#
+#    --output_dir|O <string>               output directory   
+#
+#
+#
+#  Optional:
+#
+#    --min_junction_reads <int>            minimum number of junction-spanning reads required. Default: $MIN_JUNCTION_READS
+#
+#    --min_sum_frags <int>                 minimum fusion support = ( # junction_reads + # spanning_frags ) Default: $MIN_SUM_FRAGS
+#
+#    --max_promiscuity <int>               maximum number of partners allowed for a given fusion. Default: $MAX_PROMISCUITY
+#
+#
+#    --min_novel_junction_support <int>    default: $MIN_NOVEL_JUNCTION_SUPPORT  (minimum of $MIN_NOVEL_JUNCTION_SUPPORT junction reads required if breakpoint
+#                                                        lacks involvement of only reference junctions)
+#
+#    --min_alt_pct_junction <float>        default: $MIN_ALT_PCT_JUNCTION  ($MIN_ALT_PCT_JUNCTION % of the dominant isoform junction support)
+#
+#    --aggregate_novel_junction_dist <int>  default: $AGGREGATE_NOVEL_JUNCTION_DIST (non-ref junctions within $AGGREGATE_NOVEL_JUNCTION_DIST are merged into single calls)
+#
+#    -E <float>                            E-value threshold for blast searches (default: 0.001)
+#
+#    --tmpdir <string>                     file for temporary files (default: /tmp)
+#
+#    --verbose_level <int>                 verbosity (default: $verbose_level, max=2)
+#
+#    --no_filter                           do not filter predictions.
+# 
+#    --version                             report version ($VERSION)
+#
+###################################################################################
+
+
+__EOUSAGE__
+
+    ;
+
+
+my $no_filter = 0;
+
+
+my $left_fq_filename = "";
+my $right_fq_filename = "";
+my $chimeric_out_junctions_file = "";
+
+my $REPORT_VERSION = 0;
+
+&GetOptions ( 'help|h' => \$help_flag,
+              
+              'left_fq=s' => \$left_fq_filename,
+              'right_fq=s' => \$right_fq_filename,
+              
+              'chimeric_junction|J=s' => \$chimeric_out_junctions_file,
+
+              'min_junction_reads=i' => \$MIN_JUNCTION_READS,
+              'min_sum_frags=i' => \$MIN_SUM_FRAGS,
+              'max_promiscuity=i' => \$MAX_PROMISCUITY,
+              
+              'min_novel_junction_support=i' => \$MIN_NOVEL_JUNCTION_SUPPORT,
+              'min_alt_pct_junction=f' => \$MIN_ALT_PCT_JUNCTION,
+              'aggregate_novel_junction_dist=i' => \$AGGREGATE_NOVEL_JUNCTION_DIST,
+              'output_dir|O=s' => \$output_dir,
+              
+              'E=f' => \$Evalue,
+              'tmpdir=s' => \$tmpdir,
+              'verbose_level=i' => \$verbose_level,
+    
+              'no_filter' => \$no_filter,
+    
+              'genome_lib_dir=s' => \$genome_lib_dir,
+              
+              'version' => \$REPORT_VERSION,
+    );
+
+
+if ($help_flag) {
+    die $usage;
+}
+
+if ($REPORT_VERSION) {
+    print "\n\nSTAR-Fusion version: $VERSION\n\n";
+    exit(0);
+}
+
+unless ( ($left_fq_filename || $chimeric_out_junctions_file) && $genome_lib_dir) {
+    die $usage;
+}
+
+unless (-d $genome_lib_dir) {
+    die "Error, cannot locate genome_lib_dir: $genome_lib_dir";
+}
+
+main: {
+    
+    $output_dir = &ensure_full_path($output_dir);
+    $genome_lib_dir = &ensure_full_path($genome_lib_dir);
+    $left_fq_filename = &ensure_full_path($left_fq_filename) if $left_fq_filename;
+    $right_fq_filename = &ensure_full_path($right_fq_filename) if $right_fq_filename;
+    $chimeric_out_junctions_file = &ensure_full_path($chimeric_out_junctions_file) if $chimeric_out_junctions_file;
+
+    unless (-d $output_dir) {
+        &process_cmd("mkdir -p $output_dir");
+    }
+    
+    chdir $output_dir or die "Error, cannot cd to $output_dir";
+    
+    
+    if ($out_prefix =~ m|/$|) {
+        # not allowing to end as a directory, must be a filename
+        die "Error, --out_prefix must be a file name and not a directory name, although you can include directories in the path to the file name to be created.";
+    }
+    
+    $out_prefix = &ensure_full_path($out_prefix);
+    my $out_prefix_basename = basename($out_prefix);
+    
+    my $pipeliner = new Pipeliner(-verbose => $verbose_level);
+    
+    if ($left_fq_filename) {
+        my $star_index_dir = "$genome_lib_dir/ref_genome.fa.star.idx";
+        unless (-d $star_index_dir) {
+            die "Error, cannot locate star index at $star_index_dir";
+        }
+        
+        ## run STAR to align reads:
+        my $cmd = "STAR --genomeDir $star_index_dir "
+            . " --readFilesIn $left_fq_filename $right_fq_filename "
+            . " --twopassMode Basic "
+            . " --outReadsUnmapped None "
+            . " --chimSegmentMin 12 "
+            . " --chimJunctionOverhangMin 12 "
+            . " --alignSJDBoverhangMin 10 "   
+            . " --alignMatesGapMax 200000 "
+            . " --alignIntronMax 200000 "
+            . " --chimSegmentReadGapMax parameter 3 "
+            . " --alignSJstitchMismatchNmax 5 -1 5 5 "  #which allows for up to 5 mismatches for non-canonical GC/AG, and AT/AC junctions, and any number of mismatches for canonical junctions (the default values 0 -1 0 0 replicate the old behavior (from AlexD)
+            . " --runThreadN 4"
+            . " --limitBAMsortRAM 31532137230 "
+            . " --outSAMtype BAM SortedByCoordinate ";
+        
+        if ($left_fq_filename =~ /\.gz$/) {
+            $cmd .= " --readFilesCommand zcat ";
+        }
+        
+        $pipeliner->add_commands(Command->new($cmd, "star.ok"));
+    }
+    
+    ## predict fusions
+    unless ($chimeric_out_junctions_file) {
+        $chimeric_out_junctions_file = "Chimeric.out.junction";
+    }
+    
+    my $cmd = "$UTILDIR/STAR-Fusion.predict "
+        . " -J $chimeric_out_junctions_file "
+        . " --genome_lib_dir $genome_lib_dir "
+        . " -O $out_prefix ";
+    
+    $pipeliner->add_commands(new Command($cmd, "$out_prefix.STAR-Fusion.predict.ok"));
+    
+    my $predicted_fusions_file = "$out_prefix.fusion_candidates.preliminary";
+    
+    unless ($no_filter) {
+           
+        ## filter fusions
+        
+        $cmd = "$UTILDIR/STAR-Fusion.filter "
+            . " --fusion_preds $predicted_fusions_file "
+            . " -E $Evalue "
+            . " --tmpdir $tmpdir "
+            . " --min_junction_reads $MIN_JUNCTION_READS "
+            . " --min_sum_frags $MIN_SUM_FRAGS "
+            . " --max_promiscuity $MAX_PROMISCUITY "
+            . " --min_novel_junction_support $MIN_NOVEL_JUNCTION_SUPPORT "
+            . " --min_alt_pct_junction $MIN_ALT_PCT_JUNCTION "
+            . " --aggregate_novel_junction_dist $AGGREGATE_NOVEL_JUNCTION_DIST "
+            . " --genome_lib_dir $genome_lib_dir "
+            . " --out_prefix $out_prefix";
+        
+        $pipeliner->add_commands(new Command($cmd, "$out_prefix.STAR-Fusion.filter.ok"));
+        
+        
+        if ($left_fq_filename) {
+            ## convert vals to FFPM
+            $cmd = "$UTILDIR/convert_to_FFPM.pl $left_fq_filename $out_prefix.fusion_candidates.final.abridged > $out_prefix.fusion_candidates.final.abridged.FFPM";
+            $pipeliner->add_commands(new Command($cmd, "$out_prefix.fusion_candidates.final.abridged.FFPM.ok") );
+        }
+    }
+                                 
+    $pipeliner->run();
+    
+    if ($no_filter) {
+         
+        print STDERR "\n\n *** Note: --no_filtering in effect, so outputs have not been filtered for likely false positives.\n";
+        print STDERR "\n\tSee output: $out_prefix.fusion_candidates.preliminary\n\n";
+    }
+    else {
+        
+        print STDERR "\n\n\t* Process complete.  See output: $out_prefix.fusion_candidates.final (or .abridged version)\n\n\n";
+    }
+    
+    exit(0);
+    
+}
+
+
+####
+sub missing_required_program_installed {
+    my (@required_progs) = @_;
+
+    my $missing = 0;
+    
+    foreach my $prog (@required_progs) {
+
+        my $path = `which $prog`;
+        chomp $path;
+        unless ($path && $path =~ /\w/) {
+            $missing++;
+            print STDERR "Error, cannot locate required program: $prog\n";
+        }
+        else {
+            print STDERR "-found prog $prog at $path\n";
+        }
+    }
+    
+    return($missing);
+}
+

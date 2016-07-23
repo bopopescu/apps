@@ -1,0 +1,10 @@
+#%Module 1.0
+
+set app STAR-Fusion
+set version 0.7.0
+set modroot $::env(MODIMAGE_PATH)/$app/$version
+
+append-path PERL5LIB $modroot/lib64/perl5
+append-path PATH $modroot
+
+conflict $app

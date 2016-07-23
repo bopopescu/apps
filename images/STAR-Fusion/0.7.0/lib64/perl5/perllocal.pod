@@ -1,0 +1,22 @@
+=head2 Fri Jul 15 16:25:32 2016: C<Module> L<Set::IntervalTree|Set::IntervalTree>
+
+=over 4
+
+=item *
+
+C<installed into: /home/zhanghj/apps/images/STAR-Fusion/0.7.0/share/perl5>
+
+=item *
+
+C<LINKTYPE: dynamic>
+
+=item *
+
+C<VERSION: 0.01>
+
+=item *
+
+C<EXE_FILES: >
+
+=back
+
