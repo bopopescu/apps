@@ -1,0 +1,11 @@
+#%Module 1.0
+
+set	app		samtools
+set	version		1.3.1
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+prepend-path	PATH		$modroot/bin
+append-path	CPATH		$modroot/include
+append-path	MANPATH		$modroot/share/man
+
+conflict	$app

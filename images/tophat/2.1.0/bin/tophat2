@@ -1,0 +1,15 @@
+#!/bin/bash
+prefix="/home/zhanghj/apps/images/tophat/2.1.0"
+pbin=""
+if [[ -z $prefix ]]; then
+   fl=$(readlink $0)
+   if [[ -z $fl ]]; then
+     pbin=$(dirname $0)
+   else
+     pbin=$(dirname $fl)
+   fi
+else
+ pbin=$prefix/bin
+fi
+export PATH=$pbin:$PATH
+$pbin/tophat "$@"
