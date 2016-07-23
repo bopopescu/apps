@@ -1,0 +1,10 @@
+#%Module 1.0
+
+set	app		eigen
+set	version		3.2.9
+set     modroot         $::env(MODIMAGE_PATH)/$app/$version
+
+append-path	CPATH		$modroot/include/eigen3
+append-path PKG_CONFIG_PATH $modroot/share/pkgconfig
+
+conflict	$app
