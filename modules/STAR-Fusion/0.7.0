@@ -6,5 +6,8 @@ set modroot $::env(MODIMAGE_PATH)/$app/$version
 
 append-path PERL5LIB $modroot/lib64/perl5
 append-path PATH $modroot
+append-path PATH $modroot/util
+append-path PATH $modroot/FusionFilter
+append-path PATH $modroot/FusionFilter/util
 
 conflict $app
